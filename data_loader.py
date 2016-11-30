@@ -3,40 +3,41 @@ import os
 import re
 import numpy as np
 import pickle
+import h5py
 
 word_regex = re.compile(r'\w+')
 
-def load_question_answer(data_dir, top_num):
+def load_qa_data(data_dir, top_num):
     questions = None
     answers = None
-    train_que_json = os.path.join(data_dir, 'MultipleChoice_mscoco_train2014_questions.json')
-    train_ans_json = os.path.join(data_dir, 'mscoco_train2014_annotations.json')
-    val_que_json = os.path.join(data_dir, 'MultipleChoice_mscoco_val2014_questions.json')
-    val_ans_json = os.path.join(data_dir, 'mscoco_val2014_annotations.json')
-    data_file = os.path.join(data_dir, 'data_file.pkl')
-    vocab_file = os.path.join(data_dir, 'vocab_file.pkl')
+    train_que_json_path = os.path.join(data_dir, 'MultipleChoice_mscoco_train2014_questions.json')
+    train_ans_json_path = os.path.join(data_dir, 'mscoco_train2014_annotations.json')
+    val_que_json_path = os.path.join(data_dir, 'MultipleChoice_mscoco_val2014_questions.json')
+    val_ans_json_path = os.path.join(data_dir, 'mscoco_val2014_annotations.json')
+    data_file_path = os.path.join(data_dir, 'data_file.pkl')
+    vocab_file_path = os.path.join(data_dir, 'vocab_file.pkl')
 
     # If Data Already Extracted
-    if os.path.isfile(data_file):
-        with open(data_file) as f:
+    if os.path.isfile(data_file_path):
+        with open(data_file_path) as f:
             data = pickle.load(f)
             return data
 
     # Extract Data
-    print "Loading Training Quesions: %s" % train_que_json
-    with open(train_que_json) as f:
+    print "Loading Training Quesions: %s" % train_que_json_path
+    with open(train_que_json_path) as f:
         train_que = json.load(f.read())
 
-    print "Loading Training Answers: %s" % train_ans_json
-    with open(train_ans_json) as f:
+    print "Loading Training Answers: %s" % train_ans_json_path
+    with open(train_ans_json_path) as f:
         train_ans = json.load(f.read())
 
-    print "Loading Validation Questions: %s" % val_que_json
-    with open(val_que_json) as f:
+    print "Loading Validation Questions: %s" % val_que_json_path
+    with open(val_que_json_path) as f:
         val_que = json.load(f.read())
 
-    print "Loading Validation Answers: %s" % val_ans_json
-    with open(val_ans_json) as f:
+    print "Loading Validation Answers: %s" % val_ans_json_path
+    with open(val_ans_json_path) as f:
         val_ans = json.load(f.read())
 
     questions = train_que['questions'] + val_que['questions']
@@ -85,7 +86,7 @@ def load_question_answer(data_dir, top_num):
         'train': training_data,
         'val': val_data
     }
-    with open(data_file, 'wb') as f:
+    with open(data_file_path, 'wb') as f:
         pickle.dump(data, f)
 
     vocab_data = {
@@ -93,7 +94,7 @@ def load_question_answer(data_dir, top_num):
         'que_vocab': que_vocab,
         'max_que_length': max_que_length
     }
-    with open(vocab_file, 'wb') as f:
+    with open(vocab_file_path, 'wb') as f:
         pickle.dump(vocab_data, f)
 
     return data
@@ -155,3 +156,12 @@ def build_que_vocab(questions, answers, ans_vocab):
     que_vocab['UNK'] = len(que_vocab) + 1
 
     return que_vocab, max_que_length
+
+def load_VGG_feature(data_dir, split):
+    VGG_feature = None
+    img_id_list = None
+    with h5py.File(os.path.join(data_dir, (split + '_vgg16.h5')), 'r') as hf:
+        VGG_feature = np.array(hf.get('fc7_feature'))
+    with h5py.File(os.path.join(data_dir, (split + '_img_id.h5')), 'r') as hf:
+        img_id_list = np.array(hf.get('img_id'))
+    return VGG_feature, img_id_list
