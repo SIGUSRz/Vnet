@@ -14,14 +14,16 @@ def load_qa_data(data_dir, top_num):
     train_ans_json_path = os.path.join(data_dir, 'mscoco_train2014_annotations.json')
     val_que_json_path = os.path.join(data_dir, 'MultipleChoice_mscoco_val2014_questions.json')
     val_ans_json_path = os.path.join(data_dir, 'mscoco_val2014_annotations.json')
-    data_file_path = os.path.join(data_dir, 'data_file.pkl')
+    text_file_path = os.path.join(data_dir, 'data_file.pkl')
     vocab_file_path = os.path.join(data_dir, 'vocab_file.pkl')
 
     # If Data Already Extracted
-    if os.path.isfile(data_file_path):
-        with open(data_file_path) as f:
-            data = pickle.load(f)
-            return data
+    if os.path.isfile(text_file_path):
+        with open(text_file_path) as f:
+            text_data = pickle.load(f)
+        with open(vocab_file_path) as f:
+            vocab_data = pickle.load(f)
+        return text_data, vocab_data
 
     # Extract Data
     print "Loading Training Quesions: %s" % train_que_json_path
@@ -82,12 +84,12 @@ def load_qa_data(data_dir, top_num):
     print 'Validation Data Extracted: ', len(val_data)
 
     print 'Saving Data'
-    data = {
+    text_data = {
         'train': training_data,
         'val': val_data
     }
     with open(data_file_path, 'wb') as f:
-        pickle.dump(data, f)
+        pickle.dump(text_data, f)
 
     vocab_data = {
         'ans_vocab': ans_vocab,
@@ -97,7 +99,7 @@ def load_qa_data(data_dir, top_num):
     with open(vocab_file_path, 'wb') as f:
         pickle.dump(vocab_data, f)
 
-    return data
+    return text_data, vocab_data
 
 def build_ans_vocab(answers, top_num):
     # Build Answer Frequency Dictionary
