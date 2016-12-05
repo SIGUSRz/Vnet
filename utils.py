@@ -1,9 +1,9 @@
 import numpy as np
 import tensorflow as tf
-import scipy
+import scipy.misc
 
 def load_image(image_file):
-    img = scipy.misc.imread(image_file)
+    img = scipy.misc.imread(image_file, mode='RGB')
     # GrayScale
     if len(img.shape) == 2:
         img_new = np.ndarray((img.shape[0], img.shape[1], 3), dtype='float32')

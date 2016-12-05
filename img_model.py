@@ -8,13 +8,7 @@ import time
 # VGG-16 Model Quoted From https://github.com/machrisaa/tensorflow-vgg
 VGG_MEAN = [103.939, 116.779, 123.68]
 class Vgg16:
-    def __init__(self, vgg16_npy_path=None):
-        if vgg16_npy_path is None:
-            path = inspect.getfile(Vgg16)
-            path = os.path.abspath(os.path.join(path, os.pardir))
-            path = os.path.join(path, "vgg16.npy")
-            vgg16_npy_path = path
-            print path
+    def __init__(self, vgg16_npy_path='data/vgg16.npy'):
 
         self.data_dict = np.load(vgg16_npy_path, encoding='latin1').item()
         print("npy file loaded")
