@@ -34,31 +34,6 @@ def VGG_16_extract(split, args):
     print 'Image Information Encoding Done'
     return data_loader.load_VGG_feature(args.data_dir, split)
 
-def right_align(seq, length):
-    mask = np.zeros(np.shape(seq))
-    N = np.shape(seq)[1]
-    for i in range(np.shape(seq)[0]):
-        mask[i][N - length[i]:N - 1] = seq[i][0:length[i] - 1]
-    return mask
-
-def build_batch(batch_num, batch_size, img_feature, img_id_map, qa_data, vocab_data, split):
-    qa = qa_data[split]
-    batch_start = (batch_num * batch_size) % len(qa)
-    batch_end = min(len(qa), batch_start + batch_size)
-    size = batch_end - batch_start
-    sentence = np.ndarray((n, vocab_data['max_que_length']), dtype='int32')
-    answer = np.zeros((n, len(vocab_data['ans_vocab'])))
-    img = np.ndarray((n, 4096))
-
-    counter = 0
-    for i in range(batch_start, batch_end):
-        sentence[counter, :] = qa[i]['question'][:]
-        answer[counter, qa[i]['answer']] = 1.0
-        img_index = img_id_map[qa[i]['image_id']]
-        img[counter, :] = img_feature[img_index][:]
-        counter += 1
-    return sentence, answer, img
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str, default='data', help='Data Directory')
@@ -101,6 +76,7 @@ def main():
         'rnn_layer': args.rnn_layer,
         'que_embed_size': args.que_embed_size,
         'que_vocab_size': len(vocab_data['que_vocab']),
+        'ans_vocab_size': len(vocab_data['ans_vocab']),
         'max_que_length': vocab_data['max_que_length'],
         'num_output': args.num_output,
         'dropout_rate': args.dropout_rate,
@@ -108,15 +84,17 @@ def main():
         'top_num': args.top_num,
         'init_bound': args.init_bound
         })
-    loss, feed_img, feed_que, feed_label = generator.train_model()
-    train_op = tf.train.AdamOptimizer(args.learning_rate).minimize(loss)
+    lr = args.learning_rate
+    loss, accuracy, predict, feed_img, feed_que, feed_label = generator.train_model()
+    train_op = tf.train.AdamOptimizer(lr).minimize(loss)
     sess = tf.Session()
 
-    tf.initialize_all_variables().run()
+    tf.initialize_all_variables().run(session=sess)
 
     print 'Training Start...'
     saver = tf.train.Saver()
     for epoch in range(args.num_epoch):
+        print 'Epoch %d #############' % epoch
         batch_num = 0
         while batch_num * args.batch_size < len(qa_data['train']):
             que_batch, ans_batch, img_batch = build_batch(batch_num, args.batch_size, \
@@ -128,8 +106,28 @@ def main():
                                                         feed_label: ans_batch
                                                     })
             batch_num += 1
-        saving = saver.save(sess, os.path.join(args.log_dir, 'Models', 'model%d.ckpt' % i))
-        new_lr = lr * args.lr_decay
+            if batch_num % 200 == 0:
+                print "Batch: ", batch_num, " Loss: ", loss_value, " Learning Rate: ", lr
+        saving = saver.save(sess, os.path.join(args.log_dir, 'model%d.ckpt' % i))
+        lr = lr * args.lr_decay
+
+def build_batch(batch_num, batch_size, img_feature, img_id_map, qa_data, vocab_data, split):
+    qa = qa_data[split]
+    batch_start = (batch_num * batch_size) % len(qa)
+    batch_end = min(len(qa), batch_start + batch_size)
+    size = batch_end - batch_start
+    sentence = np.ndarray((size, vocab_data['max_que_length']), dtype='int32')
+    answer = np.zeros((size, len(vocab_data['ans_vocab'])))
+    img = np.ndarray((size, 4096))
+
+    counter = 0
+    for i in range(batch_start, batch_end):
+        sentence[counter, :] = qa[i]['question'][:]
+        answer[counter, qa[i]['answer']] = 1.0
+        img_index = img_id_map[qa[i]['image_id']] if qa[i]['image_id'] in img_id_map else 0
+        img[counter, :] = img_feature[img_index][:]
+        counter += 1
+    return sentence, answer, img
 
 if __name__ == '__main__':
     main()

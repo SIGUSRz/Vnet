@@ -26,12 +26,11 @@ class Deeper_LSTM:
         self.base_cell = tf.nn.rnn_cell.BasicLSTMCell(self.rnn_size, state_is_tuple=True)
         self.drop_cell = tf.nn.rnn_cell.DropoutWrapper(self.base_cell, output_keep_prob=self.dropout_rate)
         self.stacked_cell = tf.nn.rnn_cell.MultiRNNCell([self.drop_cell] * self.rnn_layer, state_is_tuple=True)
-        self._initial_state = self.stacked_cell.zero_state(self.batch_size, tf.float32)
+        # self._initial_state = self.stacked_cell.zero_state(self.batch_size, tf.float32)
 
     def train(self):
-        sentence_batch = tf.placeholder(tf.int32, [self.batch_size, self.max_que_length])
-
-        state = self._initial_state
+        sentence_batch = tf.placeholder('int32', [None, self.max_que_length])
+        state = self.stacked_cell.zero_state(tf.shape(sentence_batch)[0], tf.float32)
         loss = 0.0
         with tf.variable_scope("RNN"):
             for time_step in range(self.max_que_length): # Max Question Length is the Number of Steps
