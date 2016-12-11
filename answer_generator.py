@@ -43,7 +43,6 @@ class Answer_Generator():
 
     def train_model(self):
         img_state = tf.placeholder('float32', [None, self.img_dim], name='img_state')
-        # question_batch = tf.placeholder('int32', [None, self.max_que_length], name='question_batch')
         label_batch = tf.placeholder('float32', [None, self.ans_vocab_size], name='label_batch')
         real_size = tf.shape(img_state)[0]
 

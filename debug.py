@@ -50,13 +50,14 @@ def main():
     parser.add_argument('--rnn_layer', type=int, default=2, help='Number of RNN Layers')
     parser.add_argument('--que_embed_size', type=int, default=200, help='Question Embedding Dimension')
 
-    parser.add_argument('--learning_rate', type=float, default=3e-4, help='Learning Rate')
-    parser.add_argument('--lr_decay', type=float, default=0.99, help='Learning Rate Decay Factor')
-    parser.add_argument('--num_iteration', type=int, default=15000, help='Number of Training Iterations')
-    parser.add_argument('--num_epoch', type=int, default=200, help='Number of Training Epochs')
+    parser.add_argument('--learning_rate', type=float, default=1e-3, help='Learning Rate')
+    parser.add_argument('--lr_decay', type=float, default=1.0, help='Learning Rate Decay Factor')
+    parser.add_argument('--num_epoch', type=int, default=2, help='Number of Training Epochs')
     parser.add_argument('--grad_norm', type=int, default=5, help='Maximum Norm of the Gradient')
     args = parser.parse_args()
 
+    if not os.path.isdir(args.log_dir):
+        os.mkdir(args.log_dir)
 
     print 'Reading Question Answer Data'
     qa_data, vocab_data = data_loader.load_qa_data(args.data_dir, args.top_num)

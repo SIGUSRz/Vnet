@@ -34,20 +34,22 @@ def main():
     parser.add_argument('--batch_size', type=int, default=64, help='Image Training Batch Size')
     parser.add_argument('--num_output', type=int, default=1000, help='Number of Output')
     parser.add_argument('--dropout_rate', type=float, default=0.5, help='Dropout Rate')
-    parser.add_argument('--init_bound', type=float, default=0.8, help='Parameter Initialization Distribution Bound')
+    parser.add_argument('--init_bound', type=float, default=0.5, help='Parameter Initialization Distribution Bound')
 
     parser.add_argument('--hidden_dim', type=int, default=1024, help='RNN Hidden State Dimension')
     parser.add_argument('--rnn_size', type=int, default=512, help='Size of RNN Cell')
     parser.add_argument('--rnn_layer', type=int, default=2, help='Number of RNN Layers')
     parser.add_argument('--que_embed_size', type=int, default=200, help='Question Embedding Dimension')
 
-    parser.add_argument('--learning_rate', type=float, default=3e-4, help='Learning Rate')
-    parser.add_argument('--lr_decay', type=float, default=0.99, help='Learning Rate Decay Factor')
-    parser.add_argument('--num_iteration', type=int, default=15000, help='Number of Training Iterations')
-    parser.add_argument('--num_epoch', type=int, default=300, help='Number of Training Epochs')
+    parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning Rate')
+    parser.add_argument('--lr_decay', type=float, default=1.0, help='Learning Rate Decay Factor')
+    parser.add_argument('--num_epoch', type=int, default=200, help='Number of Training Epochs')
     parser.add_argument('--grad_norm', type=int, default=5, help='Maximum Norm of the Gradient')
     args = parser.parse_args()
 
+    if not os.path.isdir(args.log_dir):
+        os.makedirs(os.path.join(args.log_dir, 'model'))
+        os.makedirs(os.path.join(args.log_dir, 'summary'))
 
     print 'Reading Question Answer Data'
     qa_data, vocab_data = data_loader.load_qa_data(args.data_dir, args.top_num)
@@ -84,23 +86,55 @@ def main():
 
     tf.initialize_all_variables().run(session=sess)
 
+    train_summary_writer = tf.train.SummaryWriter(os.path.join(args.log_dir, "summaries", "train"), sess.graph)
+    dev_summary_writer = tf.train.SummaryWriter(os.path.join(args.log_dir, "summaries", "dev"), sess.graph)
+
     print 'Training Start...'
     saver = tf.train.Saver()
     for epoch in range(args.num_epoch):
         print 'Epoch %d #############' % epoch
-        batch_num = 0
-        while batch_num * args.batch_size < len(qa_data['train']):
-            que_batch, ans_batch, img_batch = build_batch(batch_num, args.batch_size, \
+        train_batch_num = 0
+        dev_batch_num = 0
+        dev_acc_list = []
+        while train_batch_num * args.batch_size < len(qa_data['train']):
+            que_batch, ans_batch, img_batch = build_batch(train_batch_num, args.batch_size, \
                                                 train_img_feature, img_id_map, qa_data, vocab_data, 'train')
-            _, loss_value = sess.run([train_op, loss],
+            _, loss_value, acc, pred = sess.run([train_op, loss, accuracy, predict],
                                                     feed_dict={
                                                         feed_img: img_batch,
                                                         feed_que: que_batch,
                                                         feed_label: ans_batch
                                                     })
-            batch_num += 1
-            if batch_num % 200 == 0:
-                print "Batch: ", batch_num, " Loss: ", loss_value, " Learning Rate: ", lr
+            train_batch_num += 1
+            if train_batch_num % 500 == 0:
+                print "Batch: ", train_batch_num, " Loss: ", loss_value, " Learning Rate: ", lr
+                train_loss_summary = tf.Summary()
+                cost = train_loss_summary.value.add()
+                cost.tag = "train_loss"
+                cost.simple_value = float(loss_value)
+                train_summary_writer.add_summary(train_loss_summary)
+        while dev_batch_num * args.batch_size < len(qa_data['dev']):
+            que_batch, ans_batch, img_batch = build_batch(dev_batch_num, args.batch_size, \
+                                                train_img_feature, img_id_map, qa_data, vocab_data, 'train')
+            loss_value, acc, pred = sess.run([loss, accuracy, predict],
+                                                    feed_dict={
+                                                        feed_img: img_batch,
+                                                        feed_que: que_batch,
+                                                        feed_label: ans_batch
+                                                    })
+            dev_batch_num += 1
+            dev_acc_list.append(float(acc))
+            dev_loss_summary = tf.Summary()
+            cost = dev_loss_summary.value.add()
+            cost.tag = "dev_loss"
+            cost.simple_value = float(loss_value)
+            dev_summary_writer.add_summary(dev_loss_summary)
+        print 'Epoch: ', epoch, ' Accuracy: ', max(dev_acc_list)
+        dev_acc_summary = tf.Summary()
+        dev_acc = dev_acc_summary.value.add()
+        dev_acc.tag = "dev_accuracy"
+        dev_acc.simple_value = float(acc)
+        dev_summary_writer.add_summary(dev_acc_summary)
         saving = saver.save(sess, os.path.join(args.log_dir, 'model%d.ckpt' % i))
         lr = lr * args.lr_decay
 
