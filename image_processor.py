@@ -74,7 +74,7 @@ def VGG_16_extract(split, args):
 # VGG-16 Model Quoted From https://github.com/machrisaa/tensorflow-vgg
 VGG_MEAN = [103.939, 116.779, 123.68]
 class Vgg16:
-    def __init__(self, vgg16_npy_path='data/vgg16.npy'):
+    def __init__(self, vgg16_npy_path='/home/zs/NLP/Vnet/data/vgg16.npy'):
 
         self.data_dict = np.load(vgg16_npy_path, encoding='latin1').item()
         print("npy file loaded")
