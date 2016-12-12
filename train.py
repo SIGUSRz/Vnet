@@ -8,7 +8,7 @@ import image_processor
 import answer_generator
 from gpu import define_gpu
 define_gpu(2)
-#testing...
+#testing again...
 
 def build_batch(batch_num, batch_size, img_feature, img_id_map, qa_data, vocab_data, split):
     qa = qa_data[split]
