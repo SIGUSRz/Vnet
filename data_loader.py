@@ -11,11 +11,11 @@ def load_qa_data(data_dir, top_num):
     questions = None
     answers = None
     assert os.path.isdir(os.path.join(data_dir, 'train'))
-    assert os.path.isdir(os.path.join(data_dir, 'dev'))
+    assert os.path.isdir(os.path.join(data_dir, 'val'))
     train_que_json_path = os.path.join(data_dir,'train', 'MultipleChoice_mscoco_train2014_questions.json')
     train_ans_json_path = os.path.join(data_dir,'train', 'mscoco_train2014_annotations.json')
-    dev_que_json_path = os.path.join(data_dir,'dev', 'MultipleChoice_mscoco_val2014_questions.json')
-    dev_ans_json_path = os.path.join(data_dir,'dev', 'mscoco_val2014_annotations.json')
+    dev_que_json_path = os.path.join(data_dir,'val', 'MultipleChoice_mscoco_val2014_questions.json')
+    val_ans_json_path = os.path.join(data_dir,'val', 'mscoco_val2014_annotations.json')
     data_file_path = os.path.join(data_dir, 'data_file.pkl')
     vocab_file_path = os.path.join(data_dir, 'vocab_file.pkl')
 
@@ -90,7 +90,7 @@ def load_qa_data(data_dir, top_num):
     print 'Saving Data'
     qa_data = {
         'train': training_data,
-        'dev': dev_data
+        'val': dev_data
     }
     with open(data_file_path, 'wb') as f:
         pickle.dump(qa_data, f)

@@ -34,16 +34,16 @@ def main():
     parser.add_argument('--batch_size', type=int, default=64, help='Image Training Batch Size')
     parser.add_argument('--num_output', type=int, default=1000, help='Number of Output')
     parser.add_argument('--dropout_rate', type=float, default=0.5, help='Dropout Rate')
-    parser.add_argument('--init_bound', type=float, default=0.5, help='Parameter Initialization Distribution Bound')
+    parser.add_argument('--init_bound', type=float, default=1.0, help='Parameter Initialization Distribution Bound')
 
     parser.add_argument('--hidden_dim', type=int, default=1024, help='RNN Hidden State Dimension')
     parser.add_argument('--rnn_size', type=int, default=512, help='Size of RNN Cell')
     parser.add_argument('--rnn_layer', type=int, default=2, help='Number of RNN Layers')
     parser.add_argument('--que_embed_size', type=int, default=200, help='Question Embedding Dimension')
 
-    parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning Rate')
-    parser.add_argument('--lr_decay', type=float, default=1.0, help='Learning Rate Decay Factor')
-    parser.add_argument('--num_epoch', type=int, default=200, help='Number of Training Epochs')
+    parser.add_argument('--learning_rate', type=float, default=3e-4, help='Learning Rate')
+    parser.add_argument('--lr_decay', type=float, default=0.99, help='Learning Rate Decay Factor')
+    parser.add_argument('--num_epoch', type=int, default=3, help='Number of Training Epochs')
     parser.add_argument('--grad_norm', type=int, default=5, help='Maximum Norm of the Gradient')
     args = parser.parse_args()
 
@@ -54,11 +54,15 @@ def main():
     print 'Reading Question Answer Data'
     qa_data, vocab_data = data_loader.load_qa_data(args.data_dir, args.top_num)
     train_img_feature, train_img_id_list = image_processor.VGG_16_extract('train', args)
+    dev_img_feature, dev_img_id_list = image_processor.VGG_16_extract('val', args)
 
     print 'Building Image ID Map and Answer Map'
-    img_id_map = {}
+    train_img_id_map = {}
     for i in xrange(len(train_img_id_list)):
-        img_id_map[train_img_id_list[i]] = i
+        train_img_id_map[train_img_id_list[i]] = i
+    dev_img_id_map = {}
+    for i in xrange(len(dev_img_id_list)):
+        dev_img_id_map[dev_img_id_list[i]] = i
     ans_map = {vocab_data['ans_vocab'][ans] : ans for ans in vocab_data['ans_vocab']}
 
     print 'Building Answer Generator Model'
@@ -87,7 +91,7 @@ def main():
     tf.initialize_all_variables().run(session=sess)
 
     train_summary_writer = tf.train.SummaryWriter(os.path.join(args.log_dir, "summaries", "train"), sess.graph)
-    dev_summary_writer = tf.train.SummaryWriter(os.path.join(args.log_dir, "summaries", "dev"), sess.graph)
+    dev_summary_writer = tf.train.SummaryWriter(os.path.join(args.log_dir, "summaries", "val"), sess.graph)
 
     print 'Training Start...'
     saver = tf.train.Saver()
@@ -95,6 +99,7 @@ def main():
         print 'Epoch %d #############' % epoch
         train_batch_num = 0
         dev_batch_num = 0
+        dev_loss_list = []
         dev_acc_list = []
         while train_batch_num * args.batch_size < len(qa_data['train']):
             que_batch, ans_batch, img_batch = build_batch(train_batch_num, args.batch_size, \
@@ -110,12 +115,12 @@ def main():
                 print "Batch: ", train_batch_num, " Loss: ", loss_value, " Learning Rate: ", lr
                 train_loss_summary = tf.Summary()
                 cost = train_loss_summary.value.add()
-                cost.tag = "train_loss"
+                cost.tag = "train_loss%d" % train_batch_num
                 cost.simple_value = float(loss_value)
-                train_summary_writer.add_summary(train_loss_summary)
-        while dev_batch_num * args.batch_size < len(qa_data['dev']):
+                train_summary_writer.add_summary(train_loss_summary, train_batch_num)
+        while dev_batch_num * args.batch_size < len(qa_data['val']):
             que_batch, ans_batch, img_batch = build_batch(dev_batch_num, args.batch_size, \
-                                                train_img_feature, img_id_map, qa_data, vocab_data, 'train')
+                                                dev_img_feature, img_id_map, qa_data, vocab_data, 'val')
             loss_value, acc, pred = sess.run([loss, accuracy, predict],
                                                     feed_dict={
                                                         feed_img: img_batch,
@@ -124,17 +129,19 @@ def main():
                                                     })
             dev_batch_num += 1
             dev_acc_list.append(float(acc))
-            dev_loss_summary = tf.Summary()
-            cost = dev_loss_summary.value.add()
-            cost.tag = "dev_loss"
-            cost.simple_value = float(loss_value)
-            dev_summary_writer.add_summary(dev_loss_summary)
-        print 'Epoch: ', epoch, ' Accuracy: ', max(dev_acc_list)
+            dev_loss_list.append(float(loss_value))
+
+        dev_loss_summary = tf.Summary()
+        cost = dev_loss_summary.value.add()
+        cost.tag = "dev_loss"
+        cost.simple_value = min(dev_loss_list)
+        dev_summary_writer.add_summary(dev_loss_summary, epoch + 1)
+        print 'Epoch: ', epoch + 1, ' Accuracy: ', max(dev_acc_list)
         dev_acc_summary = tf.Summary()
         dev_acc = dev_acc_summary.value.add()
         dev_acc.tag = "dev_accuracy"
-        dev_acc.simple_value = float(acc)
-        dev_summary_writer.add_summary(dev_acc_summary)
+        dev_acc.simple_value = max(dev_acc_list)
+        dev_summary_writer.add_summary(dev_acc_summary, epoch + 1)
         saving = saver.save(sess, os.path.join(args.log_dir, 'model%d.ckpt' % i))
         lr = lr * args.lr_decay
 

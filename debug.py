@@ -22,7 +22,7 @@ def VGG_16_extract(split, args):
     if os.path.exists(os.path.join(args.data_dir, split, split + '_debug_vgg16.h5')):
         print 'Image Feature Data Calculated. Start Loading Feature Data...'
         return load_VGG_feature(args.data_dir, split)
-    train_img_feature, train_img_id_list = image_processor.VGG_16_extract('train', args)
+    img_feature, img_id_list = image_processor.VGG_16_extract(split, args)
     print 'Writing Debug Data'
     hf5_fc7 = h5py.File(os.path.join(args.data_dir, split, split + '_debug_vgg16.h5'), 'w')
     hf5_fc7.create_dataset('fc7_feature', data=train_img_feature[:128,:])
@@ -62,10 +62,14 @@ def main():
     print 'Reading Question Answer Data'
     qa_data, vocab_data = data_loader.load_qa_data(args.data_dir, args.top_num)
     train_img_feature, train_img_id_list = VGG_16_extract('train', args)
+    dev_img_feature, dev_img_id_list = VGG_16_extract('dev', args)
 
-    img_id_map = {}
+    train_img_id_map = {}
     for i in xrange(len(train_img_id_list)):
-        img_id_map[train_img_id_list[i]] = i
+        train_img_id_map[train_img_id_list[i]] = i
+    dev_img_id_map = {}
+    for i in xrange(len(dev_img_id_list)):
+        dev_img_id_map[dev_img_id_list[i]] = i
     ans_map = {vocab_data['ans_vocab'][ans] : ans for ans in vocab_data['ans_vocab']}
 
     print 'Building Answer Generator Model'
@@ -96,19 +100,51 @@ def main():
     saver = tf.train.Saver()
     for epoch in range(args.num_epoch):
         print 'Epoch %d #############' % epoch
-        batch_num = 0
-        while batch_num * args.batch_size < len(qa_data['train']):
-            que_batch, ans_batch, img_batch = build_batch(batch_num, args.batch_size, \
+        train_batch_num = 0
+        dev_batch_num = 0
+        dev_loss_list = []
+        dev_acc_list = []
+        while train_batch_num * args.batch_size < len(qa_data['train']):
+            que_batch, ans_batch, img_batch = build_batch(train_batch_num, args.batch_size, \
                                                 train_img_feature, img_id_map, qa_data, vocab_data, 'train')
-            _, loss_value = sess.run([train_op, loss],
+            _, loss_value, acc, pred = sess.run([train_op, loss, accuracy, predict],
                                                     feed_dict={
                                                         feed_img: img_batch,
                                                         feed_que: que_batch,
                                                         feed_label: ans_batch
                                                     })
-            batch_num += 1
-            if batch_num % 200 == 0:
-                print "Batch: ", batch_num, " Loss: ", loss_value, " Learning Rate: ", lr
+            train_batch_num += 1
+            if train_batch_num % 500 == 0:
+                print "Batch: ", train_batch_num, " Loss: ", loss_value, " Learning Rate: ", lr
+                train_loss_summary = tf.Summary()
+                cost = train_loss_summary.value.add()
+                cost.tag = "train_loss%d" % train_batch_num
+                cost.simple_value = float(loss_value)
+                train_summary_writer.add_summary(train_loss_summary, train_batch_num)
+        while dev_batch_num * args.batch_size < len(qa_data['dev']):
+            que_batch, ans_batch, img_batch = build_batch(dev_batch_num, args.batch_size, \
+                                                dev_img_feature, img_id_map, qa_data, vocab_data, 'dev')
+            loss_value, acc, pred = sess.run([loss, accuracy, predict],
+                                                    feed_dict={
+                                                        feed_img: img_batch,
+                                                        feed_que: que_batch,
+                                                        feed_label: ans_batch
+                                                    })
+            dev_batch_num += 1
+            dev_acc_list.append(float(acc))
+            dev_loss_list.append(float(loss_value))
+
+        dev_loss_summary = tf.Summary()
+        cost = dev_loss_summary.value.add()
+        cost.tag = "dev_loss"
+        cost.simple_value = min(dev_loss_list)
+        dev_summary_writer.add_summary(dev_loss_summary, epoch + 1)
+        print 'Epoch: ', epoch + 1, ' Accuracy: ', max(dev_acc_list)
+        dev_acc_summary = tf.Summary()
+        dev_acc = dev_acc_summary.value.add()
+        dev_acc.tag = "dev_accuracy"
+        dev_acc.simple_value = max(dev_acc_list)
+        dev_summary_writer.add_summary(dev_acc_summary, epoch + 1)
         saving = saver.save(sess, os.path.join(args.log_dir, 'model%d.ckpt' % i))
         lr = lr * args.lr_decay
 
