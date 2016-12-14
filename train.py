@@ -7,6 +7,9 @@ import os
 import image_processor
 import answer_generator
 
+from gpu import define_gpu
+define_gpu(3)
+
 def build_batch(batch_num, batch_size, img_feature, img_id_map, qa_data, vocab_data, split):
     qa = qa_data[split]
     batch_start = (batch_num * batch_size) % len(qa)
@@ -36,15 +39,15 @@ def main():
     parser.add_argument('--dropout_rate', type=float, default=0.5, help='Dropout Rate')
     parser.add_argument('--init_bound', type=float, default=1.0, help='Parameter Initialization Distribution Bound')
 
+    parser.add_argument('--extract_layer', type=str, default='pool5', help='Layer to Extract in Image CNN Model')
     parser.add_argument('--hidden_dim', type=int, default=1024, help='RNN Hidden State Dimension')
     parser.add_argument('--rnn_size', type=int, default=512, help='Size of RNN Cell')
     parser.add_argument('--rnn_layer', type=int, default=2, help='Number of RNN Layers')
     parser.add_argument('--que_embed_size', type=int, default=200, help='Question Embedding Dimension')
 
-    parser.add_argument('--learning_rate', type=float, default=3e-4, help='Learning Rate')
+    parser.add_argument('--learning_rate', type=float, default=4e-4, help='Learning Rate')
     parser.add_argument('--lr_decay', type=float, default=0.99, help='Learning Rate Decay Factor')
-    parser.add_argument('--num_epoch', type=int, default=3, help='Number of Training Epochs')
-    parser.add_argument('--grad_norm', type=int, default=5, help='Maximum Norm of the Gradient')
+    parser.add_argument('--num_epoch', type=int, default=250, help='Number of Training Epochs')
     args = parser.parse_args()
 
     if not os.path.isdir(args.log_dir):
@@ -95,6 +98,8 @@ def main():
 
     print 'Training Start...'
     saver = tf.train.Saver()
+    frozen_acc_flag = 0
+    last_acc = 0
     for epoch in range(args.num_epoch):
         print 'Epoch %d #############' % epoch
         train_batch_num = 0
@@ -103,7 +108,7 @@ def main():
         dev_acc_list = []
         while train_batch_num * args.batch_size < len(qa_data['train']):
             que_batch, ans_batch, img_batch = build_batch(train_batch_num, args.batch_size, \
-                                                train_img_feature, img_id_map, qa_data, vocab_data, 'train')
+                                                train_img_feature, train_img_id_map, qa_data, vocab_data, 'train')
             _, loss_value, acc, pred = sess.run([train_op, loss, accuracy, predict],
                                                     feed_dict={
                                                         feed_img: img_batch,
@@ -117,10 +122,10 @@ def main():
                 cost = train_loss_summary.value.add()
                 cost.tag = "train_loss%d" % train_batch_num
                 cost.simple_value = float(loss_value)
-                train_summary_writer.add_summary(train_loss_summary, train_batch_num)
+                train_summary_writer.add_summary(train_loss_summary, epoch + 1)
         while dev_batch_num * args.batch_size < len(qa_data['val']):
             que_batch, ans_batch, img_batch = build_batch(dev_batch_num, args.batch_size, \
-                                                dev_img_feature, img_id_map, qa_data, vocab_data, 'val')
+                                                dev_img_feature, dev_img_id_map, qa_data, vocab_data, 'val')
             loss_value, acc, pred = sess.run([loss, accuracy, predict],
                                                     feed_dict={
                                                         feed_img: img_batch,
@@ -131,19 +136,31 @@ def main():
             dev_acc_list.append(float(acc))
             dev_loss_list.append(float(loss_value))
 
+        epoch_loss = min(dev_acc_list)
+        epoch_acc = max(dev_acc_list)
+        # Record Epoch Training Loss Value
         dev_loss_summary = tf.Summary()
         cost = dev_loss_summary.value.add()
         cost.tag = "dev_loss"
-        cost.simple_value = min(dev_loss_list)
+        cost.simple_value = epoch_loss
         dev_summary_writer.add_summary(dev_loss_summary, epoch + 1)
-        print 'Epoch: ', epoch + 1, ' Accuracy: ', max(dev_acc_list)
+        # Record Epoch Training Accuracy Value
+        print 'Epoch: ', epoch + 1, ' Accuracy: ', epoch_acc
         dev_acc_summary = tf.Summary()
         dev_acc = dev_acc_summary.value.add()
         dev_acc.tag = "dev_accuracy"
-        dev_acc.simple_value = max(dev_acc_list)
+        dev_acc.simple_value = epoch_acc
         dev_summary_writer.add_summary(dev_acc_summary, epoch + 1)
+        # Saving Log
         saving = saver.save(sess, os.path.join(args.log_dir, 'model%d.ckpt' % i))
         lr = lr * args.lr_decay
-
+        # Early Stopping
+        if epoch_acc < last_acc:
+            frozen_acc_flag += 1
+        else:
+            frozen_acc_flag = 0
+        last_acc = epoch_acc
+        if frozen_acc_flag == 5:
+            break
 if __name__ == '__main__':
     main()

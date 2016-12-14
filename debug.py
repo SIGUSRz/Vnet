@@ -9,6 +9,8 @@ import time
 import image_processor
 import answer_generator
 
+from gpu import define_gpu
+define_gpu(3)
 def load_VGG_feature(data_dir, split):
     VGG_feature = None
     img_id_list = None
@@ -25,11 +27,11 @@ def VGG_16_extract(split, args):
     img_feature, img_id_list = image_processor.VGG_16_extract(split, args)
     print 'Writing Debug Data'
     hf5_fc7 = h5py.File(os.path.join(args.data_dir, split, split + '_debug_vgg16.h5'), 'w')
-    hf5_fc7.create_dataset('fc7_feature', data=train_img_feature[:128,:])
+    hf5_fc7.create_dataset('fc7_feature', data=img_feature[:128,:])
     hf5_fc7.close()
 
     hf5_img_id = h5py.File(os.path.join(args.data_dir, split, split + '_debug_img_id.h5'), 'w')
-    hf5_img_id.create_dataset('img_id', data=train_img_id_list[:128])
+    hf5_img_id.create_dataset('img_id', data=img_id_list[:128])
     hf5_img_id.close()
     print 'Image Information Encoding Done'
     return data_loader.load_VGG_feature(args.data_dir, split)
@@ -62,7 +64,7 @@ def main():
     print 'Reading Question Answer Data'
     qa_data, vocab_data = data_loader.load_qa_data(args.data_dir, args.top_num)
     train_img_feature, train_img_id_list = VGG_16_extract('train', args)
-    dev_img_feature, dev_img_id_list = VGG_16_extract('dev', args)
+    dev_img_feature, dev_img_id_list = VGG_16_extract('val', args)
 
     train_img_id_map = {}
     for i in xrange(len(train_img_id_list)):
@@ -106,7 +108,7 @@ def main():
         dev_acc_list = []
         while train_batch_num * args.batch_size < len(qa_data['train']):
             que_batch, ans_batch, img_batch = build_batch(train_batch_num, args.batch_size, \
-                                                train_img_feature, img_id_map, qa_data, vocab_data, 'train')
+                                                train_img_feature, train_img_id_map, qa_data, vocab_data, 'train')
             _, loss_value, acc, pred = sess.run([train_op, loss, accuracy, predict],
                                                     feed_dict={
                                                         feed_img: img_batch,
@@ -121,9 +123,9 @@ def main():
                 cost.tag = "train_loss%d" % train_batch_num
                 cost.simple_value = float(loss_value)
                 train_summary_writer.add_summary(train_loss_summary, train_batch_num)
-        while dev_batch_num * args.batch_size < len(qa_data['dev']):
+        while dev_batch_num * args.batch_size < len(qa_data['val']):
             que_batch, ans_batch, img_batch = build_batch(dev_batch_num, args.batch_size, \
-                                                dev_img_feature, img_id_map, qa_data, vocab_data, 'dev')
+                                                dev_img_feature, devimg_id_map, qa_data, vocab_data, 'val')
             loss_value, acc, pred = sess.run([loss, accuracy, predict],
                                                     feed_dict={
                                                         feed_img: img_batch,

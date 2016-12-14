@@ -1,2 +1,2 @@
 #!/bin/sh
-python train.py
+python train.py --extract_layer='fc7'

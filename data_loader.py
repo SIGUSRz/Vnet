@@ -15,7 +15,7 @@ def load_qa_data(data_dir, top_num):
     train_que_json_path = os.path.join(data_dir,'train', 'MultipleChoice_mscoco_train2014_questions.json')
     train_ans_json_path = os.path.join(data_dir,'train', 'mscoco_train2014_annotations.json')
     dev_que_json_path = os.path.join(data_dir,'val', 'MultipleChoice_mscoco_val2014_questions.json')
-    val_ans_json_path = os.path.join(data_dir,'val', 'mscoco_val2014_annotations.json')
+    dev_ans_json_path = os.path.join(data_dir,'val', 'mscoco_val2014_annotations.json')
     data_file_path = os.path.join(data_dir, 'data_file.pkl')
     vocab_file_path = os.path.join(data_dir, 'vocab_file.pkl')
 
@@ -163,11 +163,11 @@ def build_que_vocab(questions, answers, ans_vocab):
 
     return que_vocab, max_que_length
 
-def load_VGG_feature(data_dir, split):
+def load_VGG_feature(data_dir, split, extract_layer):
     VGG_feature = None
     img_id_list = None
-    with h5py.File(os.path.join(data_dir, split, (split + '_vgg16.h5')), 'r') as hf:
-        VGG_feature = np.array(hf.get('fc7_feature'))
-    with h5py.File(os.path.join(data_dir, split, (split + '_img_id.h5')), 'r') as hf:
+    with h5py.File(os.path.join(data_dir, split, (split + '_vgg16_' + extract_layer + '.h5')), 'r') as hf:
+        VGG_feature = np.array(hf.get(extract_layer + '_feature'))
+    with h5py.File(os.path.join(data_dir, split, (split + '_img_id_' + extract_layer + '.h5')), 'r') as hf:
         img_id_list = np.array(hf.get('img_id'))
     return VGG_feature, img_id_list

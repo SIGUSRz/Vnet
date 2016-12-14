@@ -12,9 +12,9 @@ import utils
 
 def VGG_16_extract(split, args):
     # If the feature is already recorded
-    if os.path.exists(os.path.join(args.data_dir, split, split + '_vgg16.h5')):
+    if os.path.exists(os.path.join(args.data_dir, split, split + '_vgg16_' + args.extract_layer + '.h5')):
         print 'Image Feature Data Calculated. Start Loading Feature Data...'
-        return data_loader.load_VGG_feature(args.data_dir, split)
+        return data_loader.load_VGG_feature(args.data_dir, split, args.extract_layer)
     print 'Image Feature Extraction Start...'
     qa_data, vocab_data = data_loader.load_qa_data(args.data_dir, args.top_num)
     if split == 'train':
@@ -31,8 +31,12 @@ def VGG_16_extract(split, args):
     print 'Total Images: ', num_img
 
     with tf.Session() as sess:
+        print 'Processing Image Dataset of ', split
         img_batch = tf.placeholder("float", [None, 224, 224, 3])
-        fc7_feature = np.ndarray((num_img, 4096))
+        if args.extract_layer == 'fc7':
+            feature = np.ndarray((num_img, 4096))
+        else if args.extract_layer == 'pool5':
+            feature = np.ndarray((num_img, 448, 448))
         idx = 0
         vgg = Vgg16()
         vgg.build(img_batch)
@@ -47,25 +51,30 @@ def VGG_16_extract(split, args):
                     break
                 img_file_path = os.path.join(args.data_dir,'%s' % split,
                                                 'COCO_%s2014_%.12d.jpg' % (split, img_id_list[idx]))
-                batch[i, :, :, :] = utils.load_image(img_file_path)
+                if os.path.exists(img_file_path):
+                    batch[i, :, :, :] = utils.load_image(img_file_path)
+                    img_counter += 1
                 idx += 1
-                img_counter += 1
 
             feed_dict = {img_batch : batch[0:img_counter, :, :, :]}
             # Feed in Images and Run through the Model
-            fc7_feature_batch = sess.run(vgg.fc7, feed_dict=feed_dict)
-            fc7_feature[(idx - img_counter):idx, :] = fc7_feature_batch[0:img_counter, :]
+            if args.extract_layer == 'fc7':
+                feature_batch = sess.run(vgg.fc7, feed_dict=feed_dict)
+                feature[(idx - img_counter):idx, :] = feature_batch[0:img_counter, :]
+            else if args.extract_layer == 'pool5':
+                feature_batch = sess.run(vgg.pool5, feed_dict=feed_dict)
+                feature[(idx - img_counter):idx, :, :, :] = feature_batch[0:img_counter, :, :, :]
             end = time.clock()
             print 'Time Spent: ', end - start
             print 'Image Processed: ', idx
         
-        print 'Saving VGG-16 FC7 Layer Features'
-        hf5_fc7 = h5py.File(os.path.join(args.data_dir, split, split + '_vgg16.h5'), 'w')
-        hf5_fc7.create_dataset('fc7_feature', data=fc7_feature)
-        hf5_fc7.close()
+        print 'Saving VGG-16 Layer Features'
+        hf5_feat = h5py.File(os.path.join(args.data_dir, split, split + '_vgg16_' + args.extract_layer + '.h5'), 'w')
+        hf5_feat.create_dataset(args.extract_layer + '_feature', data=feature)
+        hf5_feat.close()
 
         print 'Saving Image ID List'
-        hf5_img_id = h5py.File(os.path.join(args.data_dir, split, split + '_img_id.h5'), 'w')
+        hf5_img_id = h5py.File(os.path.join(args.data_dir, split, split + '_img_id_' + args.extract_layer + '.h5'), 'w')
         hf5_img_id.create_dataset('img_id', data=img_id_list)
         hf5_img_id.close()
         print 'Image Information Encoding Done'
