@@ -4,6 +4,8 @@ import re
 import numpy as np
 import pickle
 import h5py
+import itertools
+import collections
 
 word_regex = re.compile(r'\w+')
 
@@ -23,10 +25,10 @@ def load_qa_data(data_dir, top_num):
     if os.path.isfile(data_file_path):
         with open(data_file_path) as f:
             qa_data = pickle.load(f)
-        print 'Train Data Calculated and Loaded'
+        print 'Train Question Answer Data Already Exists and Loaded'
         with open(vocab_file_path) as f:
             vocab_data = pickle.load(f)
-        print 'Validation Data Calculated and Loaded'
+        print 'Dev Question Answer Data Already Exists and Loaded'
         return qa_data, vocab_data
 
     # Extract Data
@@ -38,11 +40,11 @@ def load_qa_data(data_dir, top_num):
     with open(train_ans_json_path) as f:
         train_ans = json.load(f)
 
-    print "Loading Validation Questions: %s" % dev_que_json_path
+    print "Loading Dev Questions: %s" % dev_que_json_path
     with open(dev_que_json_path) as f:
         dev_que = json.load(f)
 
-    print "Loading Validation Answers: %s" % dev_ans_json_path
+    print "Loading Dev Answers: %s" % dev_ans_json_path
     with open(dev_ans_json_path) as f:
         dev_ans = json.load(f)
 
@@ -85,7 +87,7 @@ def load_qa_data(data_dir, top_num):
             padding_num = max_que_length - len(que_words)
             for j in range(len(que_words)):
                 dev_data[-1]['question'][padding_num + j] = que_vocab[que_words[j]]
-    print 'Validation Data Extracted: ', len(dev_data)
+    print 'Dev Data Extracted: ', len(dev_data)
 
     print 'Saving Data'
     qa_data = {
@@ -163,11 +165,20 @@ def build_que_vocab(questions, answers, ans_vocab):
 
     return que_vocab, max_que_length
 
-def load_VGG_feature(data_dir, split, extract_layer):
+def load_VGG_feature_fc7(data_dir, split):
     VGG_feature = None
     img_id_list = None
-    with h5py.File(os.path.join(data_dir, split, (split + '_vgg16_' + extract_layer + '.h5')), 'r') as hf:
-        VGG_feature = np.array(hf.get(extract_layer + '_feature'))
-    with h5py.File(os.path.join(data_dir, split, (split + '_img_id_' + extract_layer + '.h5')), 'r') as hf:
+    with h5py.File(os.path.join(data_dir, split, (split + '_vgg16_fc7.h5')), 'r') as hf:
+        VGG_feature = np.array(hf.get('fc7_feature'))
+    with h5py.File(os.path.join(data_dir, split, (split + '_img_id_fc7.h5')), 'r') as hf:
+        img_id_list = np.array(hf.get('img_id'))
+    return VGG_feature, img_id_list
+
+def load_VGG_feature_pool5(data_dir, split, file_code):
+    VGG_feature = None
+    img_id_list = None
+    with h5py.File(os.path.join(data_dir, split, '%s_vgg16_pool5_%d.h5' % (split, file_code)), 'r') as hf:
+        VGG_feature = np.array(hf.get('pool5_feature'))
+    with h5py.File(os.path.join(data_dir, split, '%s_img_id_pool5_%d.h5' % (split, file_code)), 'r') as hf:
         img_id_list = np.array(hf.get('img_id'))
     return VGG_feature, img_id_list
