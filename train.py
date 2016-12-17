@@ -8,7 +8,7 @@ import image_processor
 import answer_generator
 
 from gpu import define_gpu
-define_gpu(3)
+define_gpu(1)
 
 def build_batch(batch_num, batch_size, img_feature, img_id_map, qa_data, vocab_data, split):
     qa = qa_data[split]
@@ -38,26 +38,40 @@ def main():
     parser.add_argument('--num_output', type=int, default=1000, help='Number of Output')
     parser.add_argument('--dropout_rate', type=float, default=0.5, help='Dropout Rate')
     parser.add_argument('--init_bound', type=float, default=1.0, help='Parameter Initialization Distribution Bound')
-
-    parser.add_argument('--extract_layer', type=str, default='pool5', help='Layer to Extract in Image CNN Model')
-    parser.add_argument('--hidden_dim', type=int, default=1024, help='RNN Hidden State Dimension')
-    parser.add_argument('--rnn_size', type=int, default=512, help='Size of RNN Cell')
-    parser.add_argument('--rnn_layer', type=int, default=2, help='Number of RNN Layers')
-    parser.add_argument('--que_embed_size', type=int, default=200, help='Question Embedding Dimension')
-
     parser.add_argument('--learning_rate', type=float, default=4e-4, help='Learning Rate')
     parser.add_argument('--lr_decay', type=float, default=0.99, help='Learning Rate Decay Factor')
-    parser.add_argument('--num_epoch', type=int, default=250, help='Number of Training Epochs')
+    parser.add_argument('--num_epoch', type=int, default=30, help='Number of Training Epochs')
+
+    parser.add_argument('--hidden_dim', type=int, default=1024, help='RNN Hidden State Dimension')
+    parser.add_argument('--rnn_size', type=int, default=512, help='RNN Cell Size. Question Feature Embedding Dimension. \
+                                                                Image Feature Channel Number')
+    parser.add_argument('--rnn_layer', type=int, default=2, help='Number of RNN Layers. 2 For Bidirection RNN Cell')
+    parser.add_argument('--vocab_embed_size', type=int, default=200, help='Vocabulary Embedding Dimension. \
+                                                                Used When Embedding Vocabulary In Sentence.')
+
+    parser.add_argument('--use_attention', type=bool, default=False, help='Layer to Extract in Image CNN Model')
+    parser.add_argument('--att_hidden_dim', type=int, default=16, help='Hidden Dimension of Attention Hidden State')
+    parser.add_argument('--att_round', type=int, default=0, help='Round to Apply Attention Mechanism')
     args = parser.parse_args()
 
     if not os.path.isdir(args.log_dir):
         os.makedirs(os.path.join(args.log_dir, 'model'))
         os.makedirs(os.path.join(args.log_dir, 'summary'))
 
+    #Reading Question Answer Data
     print 'Reading Question Answer Data'
     qa_data, vocab_data = data_loader.load_qa_data(args.data_dir, args.top_num)
-    train_img_feature, train_img_id_list = image_processor.VGG_16_extract('train', args)
-    dev_img_feature, dev_img_id_list = image_processor.VGG_16_extract('val', args)
+    train_img_feature, train_img_id_list = None, None
+    dev_img_feature, dev_img_id_list = None, None
+    if args.use_attention:
+        print 'Loading Image Feature Data of VGG-16 Model Layer pool5'
+        file_code = 0
+        train_img_feature, train_img_id_list = image_processor.VGG_16_extract_pool5('train', args, file_code)
+        dev_img_feature, dev_img_id_list = image_processor.VGG_16_extract_pool5('val', args, file_code)
+    else:
+        print 'Loading Image Feature Data of VGG-16 Model Layer fc7'
+        train_img_feature, train_img_id_list = image_processor.VGG_16_extract_fc7('train', args)
+        dev_img_feature, dev_img_id_list = image_processor.VGG_16_extract_fc7('val', args)
 
     print 'Building Image ID Map and Answer Map'
     train_img_id_map = {}
@@ -72,13 +86,15 @@ def main():
     generator = answer_generator.Answer_Generator({
         'batch_size': args.batch_size,
         'hidden_dim': args.hidden_dim,
-        'img_dim': train_img_feature.shape[1],
+        'img_dim': train_img_feature.shape[1:],
         'rnn_size': args.rnn_size,
         'rnn_layer': args.rnn_layer,
-        'que_embed_size': args.que_embed_size,
+        'vocab_embed_size': args.vocab_embed_size,
         'que_vocab_size': len(vocab_data['que_vocab']),
         'ans_vocab_size': len(vocab_data['ans_vocab']),
         'max_que_length': vocab_data['max_que_length'],
+        'att_hidden_dim': args.att_hidden_dim,
+        'att_round': args.att_round,
         'num_output': args.num_output,
         'dropout_rate': args.dropout_rate,
         'data_dir': args.data_dir,
@@ -87,7 +103,12 @@ def main():
         })
 
     lr = args.learning_rate
-    loss, accuracy, predict, feed_img, feed_que, feed_label = generator.train_model()
+    if args.use_attention:
+        generator.build_coattention_model()
+        loss, accuracy, predict, feed_img, feed_que, feed_label = generator.train_coattention_model()
+    else:
+        generator.build_base_model()
+        loss, accuracy, predict, feed_img, feed_que, feed_label = generator.train_base_model()
     train_op = tf.train.AdamOptimizer(lr).minimize(loss)
     sess = tf.Session()
 
@@ -101,11 +122,12 @@ def main():
     frozen_acc_flag = 0
     last_acc = 0
     for epoch in range(args.num_epoch):
-        print 'Epoch %d #############' % epoch
+        print 'Epoch %d #############' % (epoch + 1)
         train_batch_num = 0
         dev_batch_num = 0
         dev_loss_list = []
         dev_acc_list = []
+        # Training Using Training Data
         while train_batch_num * args.batch_size < len(qa_data['train']):
             que_batch, ans_batch, img_batch = build_batch(train_batch_num, args.batch_size, \
                                                 train_img_feature, train_img_id_map, qa_data, vocab_data, 'train')
@@ -123,6 +145,7 @@ def main():
                 cost.tag = "train_loss%d" % train_batch_num
                 cost.simple_value = float(loss_value)
                 train_summary_writer.add_summary(train_loss_summary, epoch + 1)
+        # Validating Using Dev Data
         while dev_batch_num * args.batch_size < len(qa_data['val']):
             que_batch, ans_batch, img_batch = build_batch(dev_batch_num, args.batch_size, \
                                                 dev_img_feature, dev_img_id_map, qa_data, vocab_data, 'val')
@@ -136,7 +159,7 @@ def main():
             dev_acc_list.append(float(acc))
             dev_loss_list.append(float(loss_value))
 
-        epoch_loss = min(dev_acc_list)
+        epoch_loss = min(dev_loss_list)
         epoch_acc = max(dev_acc_list)
         # Record Epoch Training Loss Value
         dev_loss_summary = tf.Summary()
@@ -155,7 +178,7 @@ def main():
         saving = saver.save(sess, os.path.join(args.log_dir, 'model%d.ckpt' % i))
         lr = lr * args.lr_decay
         # Early Stopping
-        if epoch_acc < last_acc:
+        if epoch_acc <= last_acc:
             frozen_acc_flag += 1
         else:
             frozen_acc_flag = 0

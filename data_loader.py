@@ -4,8 +4,6 @@ import re
 import numpy as np
 import pickle
 import h5py
-import itertools
-import collections
 
 word_regex = re.compile(r'\w+')
 

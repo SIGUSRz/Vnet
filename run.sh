@@ -1,2 +1,2 @@
 #!/bin/sh
-python train.py --extract_layer='fc7'
+python train.py --log_dir=log/1
