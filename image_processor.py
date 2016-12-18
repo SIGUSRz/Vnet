@@ -40,6 +40,7 @@ def VGG_16_extract_pool5(split, args, file_code):
         vgg = Vgg16()
         vgg.build(img_batch)
         filled_size = 0
+        id_list = []
 
         while idx < num_img:
             start = time.clock()
@@ -53,6 +54,7 @@ def VGG_16_extract_pool5(split, args, file_code):
                                                 'COCO_%s2014_%.12d.jpg' % (split, img_id_list[idx]))
                 if os.path.exists(img_file_path):
                     batch[i, :, :, :] = utils.load_image(img_file_path)
+                    id_list.append(img_id_list[idx])
                     img_counter += 1
                     filled_size += 1
                 idx += 1
@@ -64,7 +66,7 @@ def VGG_16_extract_pool5(split, args, file_code):
             end = time.clock()
             print 'Time Spent: ', end - start
             print 'Image Processed: ', idx
-            if filled_size >= file_size:
+            if filled_size >= file_size or idx >= num_img:
                 print 'Saving VGG-16 Layer Features'
                 hf5_feat = h5py.File(os.path.join(args.data_dir, split, '%s_vgg16_pool5_%d.h5' % \
                                                         (split, file_code)), 'w')
@@ -74,12 +76,13 @@ def VGG_16_extract_pool5(split, args, file_code):
                 print 'Saving Image ID List'
                 hf5_img_id = h5py.File(os.path.join(args.data_dir, split, '%s_img_id_pool5_%d.h5' % \
                                                         (split, file_code)), 'w')
-                hf5_img_id.create_dataset('img_id', data=img_id_list)
+                hf5_img_id.create_dataset('img_id', data=id_list)
                 hf5_img_id.close()
 
                 print 'Finishing Saving Data Bucket %d' % file_code
                 file_code += 1
                 filled_size = 0
+                id_list = []
                 feature = np.ndarray((file_size, 7, 7, 512))
         print 'Image Information Encoding Done'   
         return data_loader.load_VGG_feature_pool5(args.data_dir, split, 0)

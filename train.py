@@ -10,23 +10,52 @@ import answer_generator
 from gpu import define_gpu
 define_gpu(1)
 
-def build_batch(batch_num, batch_size, img_feature, img_id_map, qa_data, vocab_data, split):
+def build_fc7_batch(batch_head, batch_size, img_feature, img_id_map, qa_data, vocab_data, split):
     qa = qa_data[split]
-    batch_start = (batch_num * batch_size) % len(qa)
-    batch_end = min(len(qa), batch_start + batch_size)
-    size = batch_end - batch_start
-    sentence = np.ndarray((size, vocab_data['max_que_length']), dtype='int32')
-    answer = np.zeros((size, len(vocab_data['ans_vocab'])))
-    img = np.ndarray((size, 4096))
+    sentence = np.ndarray((batch_size, vocab_data['max_que_length']), dtype='int32')
+    answer = np.zeros((batch_size, len(vocab_data['ans_vocab'])))
+    img = np.ndarray((batch_size, 4096), dtype='float32')
 
     counter = 0
-    for i in range(batch_start, batch_end):
-        sentence[counter, :] = qa[i]['question'][:]
-        answer[counter, qa[i]['answer']] = 1.0
-        img_index = img_id_map[qa[i]['image_id']]
-        img[counter, :] = img_feature[img_index][:]
-        counter += 1
-    return sentence, answer, img
+    while batch_head < len(qa) and counter < batch_size:
+        if qa[batch_head]['image_id'] in img_id_map:
+            sentence[counter, :] = qa[batch_head]['question'][:]
+            answer[counter, qa[batch_head]['answer']] = 1.0
+            img_index = img_id_map[qa[batch_head]['image_id']]
+            img[counter, :] = img_feature[img_index][:]
+            counter += 1
+            batch_head += 1
+        else:
+            batch_head += 1
+    if counter < batch_size:
+        sentence = sentence[:counter, :]
+        answer = answer[:counter, :]
+        img = img[:counter, :]
+    return sentence, answer, img, batch_head
+
+def build_pool5_batch(batch_head, batch_size, img_feature, img_id_map, qa_data, vocab_data, split):
+    qa = qa_data[split]
+    sentence = np.ndarray((batch_size, vocab_data['max_que_length']), dtype='int32')
+    answer = np.zeros((batch_size, len(vocab_data['ans_vocab'])))
+    img = np.ndarray((batch_size, 7, 7, 512), dtype='float32')
+
+    counter = 0
+    while batch_head < len(qa) and counter < batch_size:
+        if qa[batch_head]['image_id'] in img_id_map:
+            sentence[counter, :] = qa[batch_head]['question'][:]
+            answer[counter, qa[batch_head]['answer']] = 1.0
+            img_index = img_id_map[qa[batch_head]['image_id']]
+            img[counter, :, :, :] = img_feature[img_index][:]
+            counter += 1
+            batch_head += 1
+        else:
+            batch_head += 1
+    if counter < batch_size:
+        sentence = sentence[:counter, :]
+        answer = answer[:counter, :]
+        img = img[:counter, :, :, :]
+    img = np.reshape(img, (img.shape[0], -1, img.shape[-1]))
+    return sentence, answer, img, batch_head
 
 def main():
     parser = argparse.ArgumentParser()
@@ -34,7 +63,7 @@ def main():
     parser.add_argument('--log_dir', type=str, default='log', help='Checkpoint File Directory')
     parser.add_argument('--top_num', type=int, default=1000, help='Top Number Answer')
 
-    parser.add_argument('--batch_size', type=int, default=64, help='Image Training Batch Size')
+    parser.add_argument('--batch_size', type=int, default=16, help='Image Training Batch Size')
     parser.add_argument('--num_output', type=int, default=1000, help='Number of Output')
     parser.add_argument('--dropout_rate', type=float, default=0.5, help='Dropout Rate')
     parser.add_argument('--init_bound', type=float, default=1.0, help='Parameter Initialization Distribution Bound')
@@ -49,8 +78,8 @@ def main():
     parser.add_argument('--vocab_embed_size', type=int, default=200, help='Vocabulary Embedding Dimension. \
                                                                 Used When Embedding Vocabulary In Sentence.')
 
-    parser.add_argument('--use_attention', type=bool, default=False, help='Layer to Extract in Image CNN Model')
-    parser.add_argument('--att_hidden_dim', type=int, default=16, help='Hidden Dimension of Attention Hidden State')
+    parser.add_argument('--use_attention', type=bool, default=True, help='Layer to Extract in Image CNN Model')
+    parser.add_argument('--att_hidden_dim', type=int, default=512, help='Hidden Dimension of Attention Hidden State')
     parser.add_argument('--att_round', type=int, default=0, help='Round to Apply Attention Mechanism')
     args = parser.parse_args()
 
@@ -81,6 +110,14 @@ def main():
     for i in xrange(len(dev_img_id_list)):
         dev_img_id_map[dev_img_id_list[i]] = i
     ans_map = {vocab_data['ans_vocab'][ans] : ans for ans in vocab_data['ans_vocab']}
+
+    print 'Dataset Stats ##############'
+    print 'Loaded Train Question Annotation: %d' % (len(qa_data['train']))
+    print 'Loaded Dev Question Annotation: %d' % (len(qa_data['val']))
+    print 'Loaded Train Image Feature: %d' % (train_img_feature.shape[0])
+    print 'Loaded Dev Image Feature: %d' % (dev_img_feature.shape[0])
+    print '############################'
+
 
     print 'Building Answer Generator Model'
     generator = answer_generator.Answer_Generator({
@@ -123,14 +160,21 @@ def main():
     last_acc = 0
     for epoch in range(args.num_epoch):
         print 'Epoch %d #############' % (epoch + 1)
+        train_batch_head = 0
+        dev_batch_head = 0
         train_batch_num = 0
         dev_batch_num = 0
         dev_loss_list = []
         dev_acc_list = []
         # Training Using Training Data
-        while train_batch_num * args.batch_size < len(qa_data['train']):
-            que_batch, ans_batch, img_batch = build_batch(train_batch_num, args.batch_size, \
-                                                train_img_feature, train_img_id_map, qa_data, vocab_data, 'train')
+        while train_batch_head < len(train_img_id_list):
+            que_batch, ans_batch, img_batch = None, None, None
+            if args.use_attention:
+                que_batch, ans_batch, img_batch, train_batch_head = build_pool5_batch(train_batch_head, args.batch_size, \
+                                                    train_img_feature, train_img_id_map, qa_data, vocab_data, 'train')
+            else:
+                que_batch, ans_batch, img_batch, train_batch_head = build_fc7_batch(train_batch_head, args.batch_size, \
+                                                    train_img_feature, train_img_id_map, qa_data, vocab_data, 'train')
             _, loss_value, acc, pred = sess.run([train_op, loss, accuracy, predict],
                                                     feed_dict={
                                                         feed_img: img_batch,
@@ -146,8 +190,12 @@ def main():
                 cost.simple_value = float(loss_value)
                 train_summary_writer.add_summary(train_loss_summary, epoch + 1)
         # Validating Using Dev Data
-        while dev_batch_num * args.batch_size < len(qa_data['val']):
-            que_batch, ans_batch, img_batch = build_batch(dev_batch_num, args.batch_size, \
+        while dev_batch_head < len(dev_img_id_list):
+            if args.use_attention:
+                que_batch, ans_batch, img_batch, dev_batch_head = build_pool5_batch(dev_batch_head, args.batch_size, \
+                                                dev_img_feature, dev_img_id_map, qa_data, vocab_data, 'val')
+            else:
+                que_batch, ans_batch, img_batch, dev_batch_head = build_fc7_batch(dev_batch_head, args.batch_size, \
                                                 dev_img_feature, dev_img_id_map, qa_data, vocab_data, 'val')
             loss_value, acc, pred = sess.run([loss, accuracy, predict],
                                                     feed_dict={

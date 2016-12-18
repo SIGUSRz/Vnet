@@ -30,6 +30,7 @@ class Answer_Generator():
 
     def build_base_model(self):
         self.que_processor.build_base_cell()
+        self.img_dim = self.img_dim[0]
         self.que_W = tf.Variable(tf.random_uniform([2 * self.rnn_layer * self.rnn_size , self.hidden_dim], \
                                                         -self.init_bound, self.init_bound),
                                                         name='que_W')
@@ -73,31 +74,41 @@ class Answer_Generator():
 
     def build_coattention_model(self):
         self.que_processor.build_hierarchy_cell()
+        self.img_dim = (self.img_dim[0] * self.img_dim[1], self.img_dim[2])
         self.att_hidden_dim = self.params['att_hidden_dim']
-        self.hidden_W = tf.Variable(tf.random_uniform([self.rnn_size, self.rnn_size], \
+        # W_c: Embedding Matrix for Constructing Affinity Map C
+        self.hidden_W = tf.Variable(tf.random_uniform([self.att_hidden_dim, self.rnn_size], \
                                                         -self.init_bound, self.init_bound),
                                                         name='hidden_W')
-        self.que_W = tf.Variable(tf.random_uniform([self.att_hidden_dim , self.rnn_size], \
+        # W_v - (k, d)
+        self.Q_W = tf.Variable(tf.random_uniform([self.att_hidden_dim , self.rnn_size], \
                                                         -self.init_bound, self.init_bound),
                                                         name='que_W')
-        self.que_b = tf.Variable(tf.random_uniform([self.img_dim, self.att_hidden_dim], \
+        # Bias for H_v - (N, k)
+        self.Q_b = tf.Variable(tf.random_uniform([self.max_que_length, self.att_hidden_dim], \
                                                         -self.init_bound, self.init_bound), 
                                                         name='que_b')
-        self.img_W = tf.Variable(tf.random_uniform([self.att_hidden_dim, self.rnn_size], \
+        # W_q - (d, k)
+        self.V_W = tf.Variable(tf.random_uniform([self.att_hidden_dim, self.rnn_size], \
                                                         -self.init_bound, self.init_bound),
                                                         name='img_W')
-        self.img_b = tf.Variable(tf.random_uniform([self.max_que_length, self.att_hidden_dim], \
+        # Bias for H_q - (T, k)
+        self.V_b = tf.Variable(tf.random_uniform([self.img_dim[0], self.att_hidden_dim], \
                                                         -self.init_bound, self.init_bound),
                                                         name='img_b')
+        # W_hv
         self.img_att_W = tf.Variable(tf.random_uniform([self.att_hidden_dim, 1], \
                                                         -self.init_bound, self.init_bound),
                                                         name='img_att_W')
-        self.img_att_b = tf.Variable(tf.random_uniform([self.img_dim, 1], \
+        # Bias for a_v - (N, 1)
+        self.img_att_b = tf.Variable(tf.random_uniform([self.img_dim[0], 1], \
                                                         -self.init_bound, self.init_bound),
                                                         name='img_att_b')
+        # W_hq
         self.que_att_W = tf.Variable(tf.random_uniform([self.att_hidden_dim, 1], \
                                                         -self.init_bound, self.init_bound),
                                                         name='que_att_W')
+        # Bias for a_q - (T, 1)
         self.que_att_b = tf.Variable(tf.random_uniform([self.max_que_length, 1], \
                                                         -self.init_bound, self.init_bound),
                                                         name='que_att_b')
@@ -114,17 +125,17 @@ class Answer_Generator():
                                                         -self.init_bound, self.init_bound),
                                                         name='score_b')
     def train_coattention_model(self):
-        img_state = tf.placeholder('float32', [None, self.img_dim[0], self.img_dim[1], self.img_dim[2]], name='img_state')
+        img_state = tf.placeholder('float32', [None, self.img_dim[0], self.img_dim[1]], name='att_img_state')
         img_state = tf.contrib.layers.batch_norm(img_state)
-        label_batch = tf.placeholder('float32', [None, self.ans_vocab_size], name='label_batch')
+        label_batch = tf.placeholder('float32', [None, self.ans_vocab_size], name='att_label_batch')
         real_size = tf.shape(img_state)[0]
 
         que_state, sentence_batch = self.que_processor.train_hierarchy_cell()
         with tf.variable_scope('attention'):
             img_attention, que_attention, new_img_state, new_que_state, hidden_state = self.add_attention(img_state, que_state)
-        score = tf.tanh(tf.matmul(img_attention, self.score_W) + tf.matmul(que_attention, self.score_W) + self.score_b)
+        score = tf.tanh(tf.matmul(img_attention, self.drop_W) + tf.matmul(que_attention, self.drop_W) + self.drop_b)
         score = tf.nn.dropout(score, 1 - self.dropout_rate)
-        logits = tf.relu(tf.nn.xw_plus_b(score, self.score_W, self.score_b))
+        logits = tf.nn.relu(tf.nn.xw_plus_b(score, self.score_W, self.score_b))
         # logits = tf.contrib.layers.batch_norm(logtis)
 
         cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits, label_batch, name='entropy')
@@ -142,12 +153,12 @@ class Answer_Generator():
             update = True
             hidden_state = tf.einsum('aik,ajk->ij', tf.einsum('ijk,lk->ijl', img_state, self.hidden_W), que_state)
 
-        img_hidden_state = tf.nn.tanh(tf.einsum('aij,kj->ik', img_state, self.img_W) + \
+        img_hidden_state = tf.nn.tanh(tf.einsum('aij,kj->ik', img_state, self.V_W) + \
                                                         tf.einsum('ij,ki->jk', tf.einsum('aij,ki->kj', que_state, \
-                                                        hidden_state)) + self.que_b)
-        que_hidden_state = tf.nn.tanh(tf.einsum('aij,kj->ik', que_state, self.que_W) + \
-                                                        tf.einsum('ij,ik->jk', tf.einsum('aij,ki->kj', img_state, \
-                                                        hidden_state)) + self.img_b)
+                                                        hidden_state), self.Q_W) + self.V_b)
+        que_hidden_state = tf.nn.tanh(tf.einsum('aij,kj->ik', que_state, self.Q_W) + \
+                                                        tf.einsum('ij,ik->jk', tf.einsum('aij,ik->kj', img_state, \
+                                                        hidden_state), self.V_W) + self.Q_b)
         img_attention_W = tf.nn.softmax(tf.matmul(img_hidden_state, self.img_att_W) + self.img_att_b)
         que_attention_W = tf.nn.softmax(tf.matmul(que_hidden_state, self.que_att_W) + self.que_att_b)
 

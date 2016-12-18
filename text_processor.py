@@ -35,7 +35,7 @@ class Deeper_LSTM:
             for time_step in range(self.max_que_length): # Max Question Length is the Number of Steps
                 if time_step > 0:
                     tf.get_variable_scope().reuse_variables()
-                linear_embedding = tf.nn.embedding_lookup(self.que_embed_W, sentence_batch[:, time_step - 1])
+                linear_embedding = tf.nn.embedding_lookup(self.que_embed_W, sentence_batch[:, time_step])
                 drop_embedding = tf.nn.dropout(linear_embedding, 1 - self.dropout_rate)
                 que_embedding = tf.tanh(drop_embedding)
         output, state = self.stacked_cell(que_embedding, state)
@@ -60,24 +60,24 @@ class Deeper_LSTM:
 
     def train_hierarchy_cell(self):
         sentence_batch = tf.placeholder('int32', [None, self.max_que_length])
-        state = self.stacked_cell.zero_state(tf.shape(sentence_batch)[0], tf.float32)
-        loss = 0.0
+
+        word_embedding = tf.nn.embedding_lookup(self.que_embed_W, sentence_batch)
+        uni_embedding = tf.tanh(tf.nn.conv1d(word_embedding, self.uni_filter, stride=1, padding='SAME'))
+        bi_embedding = tf.tanh(tf.nn.conv1d(word_embedding, self.bi_filter, stride=1, padding='SAME'))
+        tri_embedding = tf.tanh(tf.nn.conv1d(word_embedding, self.tri_filter, stride=1, padding='SAME'))
+
+        phs_embedding = tf.pack([uni_embedding, bi_embedding, tri_embedding], axis=3)
+        phs_embedding = tf.reduce_max(phs_embedding, reduction_indices=[3])
+
+        sen_embedding = None
+        state = self.stacked_cell.zero_state(tf.shape(phs_embedding)[0], tf.float32)
         with tf.variable_scope("RNN"):
             for time_step in range(self.max_que_length): # Max Question Length is the Number of Steps
                 if time_step > 0:
                     tf.get_variable_scope().reuse_variables()
-                word_embedding = tf.nn.embedding_lookup(self.que_embed_W, sentence_batch[:, time_step - 1])
-                word_embedding = tf.expand_dims(word_embedding, 0)
-                uni_embedding = tf.nn.conv1d(word_embedding, self.uni_filter, stride=1, padding='SAME')
-                bi_embedding = tf.nn.conv1d(word_embedding, self.bi_filter, stride=1, padding='SAME')
-                tri_embedding = tf.nn.conv1d(word_embedding, self.tri_filter, stride=1, padding='SAME')
-                uni_embedding = tf.reshape(uni_embedding, [tf.shape(uni_embedding)[1], 1, self.rnn_size])
-                bi_embedding = tf.reshape(bi_embedding, [tf.shape(bi_embedding)[1], 1, self.rnn_size])
-                tri_embedding = tf.reshape(tri_embedding, [tf.shape(tri_embedding)[1], 1, self.rnn_size])
-                que_embedding = np.stack([uni_embedding, np.stack([bi_embedding, tri_embedding], axis=1)], axis=1)
-                print tf.Tensor.get_shape(uni_embedding)
-                print tf.Tensor.get_shape(bi_embedding)
-                print tf.Tensor.get_shape(tri_embedding)
-                # print tf.Tensor.get_shape(que_embedding)
-        output, state = self.stacked_cell(uni_embedding, state)
-        return state, sentence_batch
+                output, state = self.stacked_cell(phs_embedding[:, time_step, :], state)
+                if time_step == 0:
+                    sen_embedding = tf.expand_dims(output, 1)
+                else:
+                    sen_embedding = tf.concat(1, [sen_embedding, tf.expand_dims(output, 1)])
+        return sen_embedding, sentence_batch
