@@ -4,7 +4,6 @@ import numpy as np
 import os, h5py, sys, argparse
 import time
 import math
-import cv2
 import codecs, json
 from sklearn.metrics import average_precision_score
 

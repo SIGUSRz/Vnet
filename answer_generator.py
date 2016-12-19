@@ -76,6 +76,7 @@ class Answer_Generator():
         self.que_processor.build_hierarchy_cell()
         self.img_dim = (self.img_dim[0] * self.img_dim[1], self.img_dim[2])
         self.att_hidden_dim = self.params['att_hidden_dim']
+        self.att_round = self.params['att_round']
         # W_c: Embedding Matrix for Constructing Affinity Map C
         self.hidden_W = tf.Variable(tf.random_uniform([self.att_hidden_dim, self.rnn_size], \
                                                         -self.init_bound, self.init_bound),
@@ -112,12 +113,15 @@ class Answer_Generator():
         self.que_att_b = tf.Variable(tf.random_uniform([self.max_que_length, 1], \
                                                         -self.init_bound, self.init_bound),
                                                         name='que_att_b')
-        self.drop_W = tf.Variable(tf.random_uniform([self.rnn_size, self.hidden_dim], \
+        self.linear_V_W = tf.Variable(tf.random_uniform([self.rnn_size, self.hidden_dim], \
                                                         -self.init_bound, self.init_bound),
-                                                        name='drop_W')
-        self.drop_b = tf.Variable(tf.random_uniform([self.hidden_dim], \
+                                                        name='linear_V_W')
+        self.linear_Q_W = tf.Variable(tf.random_uniform([self.rnn_size, self.hidden_dim], \
                                                         -self.init_bound, self.init_bound),
-                                                        name='drop_b')
+                                                        name='linear_Q_W')
+        self.linear_b = tf.Variable(tf.random_uniform([self.hidden_dim], \
+                                                        -self.init_bound, self.init_bound),
+                                                        name='linear_b')
         self.score_W = tf.Variable(tf.random_uniform([self.hidden_dim, self.num_output], \
                                                         -self.init_bound, self.init_bound),
                                                         name='score_W')
@@ -126,23 +130,28 @@ class Answer_Generator():
                                                         name='score_b')
     def train_coattention_model(self):
         img_state = tf.placeholder('float32', [None, self.img_dim[0], self.img_dim[1]], name='att_img_state')
-        img_state = tf.contrib.layers.batch_norm(img_state)
         label_batch = tf.placeholder('float32', [None, self.ans_vocab_size], name='att_label_batch')
+        feed_img_state = img_state
         real_size = tf.shape(img_state)[0]
-
         que_state, sentence_batch = self.que_processor.train_hierarchy_cell()
         with tf.variable_scope('attention'):
-            img_attention, que_attention, new_img_state, new_que_state, hidden_state = self.add_attention(img_state, que_state)
-        score = tf.tanh(tf.matmul(img_attention, self.drop_W) + tf.matmul(que_attention, self.drop_W) + self.drop_b)
+            img_attention, que_attention, new_img_state, new_que_state, update_hidden_state = \
+                                                                self.add_attention(feed_img_state, que_state)
+            hidden_state = None
+            for i in range(self.att_round):
+                hidden_state = self.memory_cell(img_attention, que_attention, update_hidden_state, hidden_state)
+                img_attention, que_attention, new_img_state, new_que_state, update_hidden_state = \
+                                                                self.add_attention(feed_img_state, que_state, hidden_state)
+        score = tf.tanh(tf.matmul(img_attention, self.linear_V_W) + tf.matmul(que_attention, self.linear_Q_W) + self.linear_b)
         score = tf.nn.dropout(score, 1 - self.dropout_rate)
         logits = tf.nn.relu(tf.nn.xw_plus_b(score, self.score_W, self.score_b))
-        # logits = tf.contrib.layers.batch_norm(logtis)
 
         cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits, label_batch, name='entropy')
         ans_probability = tf.nn.softmax(logits, name='answer_prob')
 
         predict = tf.argmax(ans_probability, 1)
         correct_predict = tf.equal(tf.argmax(ans_probability, 1), tf.argmax(label_batch, 1))
+
         accuracy = tf.reduce_mean(tf.cast(correct_predict, tf.float32))
         loss = tf.reduce_sum(cross_entropy, name='loss')
         return loss, accuracy, predict, img_state, sentence_batch, label_batch
@@ -170,3 +179,11 @@ class Answer_Generator():
         if update:
             hidden_state = tf.einsum('aik,ajk->ij', tf.einsum('ijk,lk->ijl', img_state, self.hidden_W), que_state)
         return img_attention, que_attention, new_img_state, new_que_state, hidden_state
+
+    def memory_cell(self, img_state, que_state, C_update=None, C=None):
+        if C == None:
+            return C_update
+        f_gate = tf.tanh(tf.reduce_sum(tf.matmul(img_state, self.linear_V_W) + \
+                                tf.matmul(que_state, self.linear_Q_W) + self.linear_b))
+        _C = tf.scalar_mul(1 - f_gate, C) + tf.scalar_mul(f_gate, C_update)
+        return _C

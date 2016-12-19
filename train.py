@@ -63,24 +63,24 @@ def main():
     parser.add_argument('--log_dir', type=str, default='log', help='Checkpoint File Directory')
     parser.add_argument('--top_num', type=int, default=1000, help='Top Number Answer')
 
-    parser.add_argument('--batch_size', type=int, default=16, help='Image Training Batch Size')
+    parser.add_argument('--batch_size', type=int, default=8, help='Image Training Batch Size')
     parser.add_argument('--num_output', type=int, default=1000, help='Number of Output')
     parser.add_argument('--dropout_rate', type=float, default=0.5, help='Dropout Rate')
-    parser.add_argument('--init_bound', type=float, default=1.0, help='Parameter Initialization Distribution Bound')
+    parser.add_argument('--init_bound', type=float, default=0.5, help='Parameter Initialization Distribution Bound')
     parser.add_argument('--learning_rate', type=float, default=4e-4, help='Learning Rate')
-    parser.add_argument('--lr_decay', type=float, default=0.99, help='Learning Rate Decay Factor')
-    parser.add_argument('--num_epoch', type=int, default=30, help='Number of Training Epochs')
+    parser.add_argument('--lr_decay', type=float, default=1e-5, help='Learning Rate Decay Factor')
+    parser.add_argument('--num_epoch', type=int, default=20, help='Number of Training Epochs')
 
-    parser.add_argument('--hidden_dim', type=int, default=1024, help='RNN Hidden State Dimension')
+    parser.add_argument('--hidden_dim', type=int, default=512, help='RNN Hidden State Dimension')
     parser.add_argument('--rnn_size', type=int, default=512, help='RNN Cell Size. Question Feature Embedding Dimension. \
                                                                 Image Feature Channel Number')
-    parser.add_argument('--rnn_layer', type=int, default=2, help='Number of RNN Layers. 2 For Bidirection RNN Cell')
-    parser.add_argument('--vocab_embed_size', type=int, default=200, help='Vocabulary Embedding Dimension. \
+    parser.add_argument('--rnn_layer', type=int, default=3, help='Number of RNN Layers. 2 For Bidirection RNN Cell')
+    parser.add_argument('--vocab_embed_size', type=int, default=512, help='Vocabulary Embedding Dimension. \
                                                                 Used When Embedding Vocabulary In Sentence.')
 
     parser.add_argument('--use_attention', type=bool, default=True, help='Layer to Extract in Image CNN Model')
     parser.add_argument('--att_hidden_dim', type=int, default=512, help='Hidden Dimension of Attention Hidden State')
-    parser.add_argument('--att_round', type=int, default=0, help='Round to Apply Attention Mechanism')
+    parser.add_argument('--att_round', type=int, default=3, help='Round to Apply Attention Mechanism')
     args = parser.parse_args()
 
     if not os.path.isdir(args.log_dir):
@@ -207,8 +207,8 @@ def main():
             dev_acc_list.append(float(acc))
             dev_loss_list.append(float(loss_value))
 
-        epoch_loss = min(dev_loss_list)
-        epoch_acc = max(dev_acc_list)
+        epoch_loss = sum(dev_loss_list) / len(dev_loss_list)
+        epoch_acc = sum(dev_acc_list) / len(dev_acc_list)
         # Record Epoch Training Loss Value
         dev_loss_summary = tf.Summary()
         cost = dev_loss_summary.value.add()
@@ -224,7 +224,7 @@ def main():
         dev_summary_writer.add_summary(dev_acc_summary, epoch + 1)
         # Saving Log
         saving = saver.save(sess, os.path.join(args.log_dir, 'model%d.ckpt' % i))
-        lr = lr * args.lr_decay
+        lr = lr * (1 - args.lr_decay)
         # Early Stopping
         if epoch_acc <= last_acc:
             frozen_acc_flag += 1

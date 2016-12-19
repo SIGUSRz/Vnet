@@ -10,7 +10,7 @@ import answer_generator
 import data_loader
 
 from gpu import define_gpu
-define_gpu(1)
+define_gpu(2)
 
 def build_pool5_batch(batch_head, batch_size, img_feature, img_id_map, qa_data, vocab_data, split):
     qa = qa_data[split]
